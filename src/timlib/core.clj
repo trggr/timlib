@@ -101,6 +101,15 @@
       second
       first))
 
+(defn- process-as-batch
+  "Takes ps and binds coll of params to it. Executes
+   ps via JDBC batch update, returning the count of affected db rows"
+  [ps coll]
+  (run! (fn [params] (.addBatch (bind-params ps params)))
+        coll)
+  (.executeBatch ps)
+  (.getUpdateCount ps))
+
 (defn batch-update
   "Runs DML via JDBC batch mode"
   ([conn dml]
@@ -108,16 +117,11 @@
   ([conn dml rows]
    (batch-update conn dml rows 2000))
   ([conn dml rows batchsize]
-   (let [cursor (.prepareStatement conn dml)
-         cnt (->> rows
-                  (partition-all batchsize)
-                  (map (fn [batch]
-                         (run! #(.addBatch (bind-params cursor %)) batch)
-                         (.executeBatch cursor)
-                         (.getUpdateCount cursor)))
-                  (reduce +))]
-     (.close cursor)
-     cnt)))
+   (with-open [ps (.prepareStatement conn dml)]
+     (->> rows
+          (partition-all batchsize)
+          (map (fn [batch] (process-as-batch ps batch)))
+          (reduce +)))))
 
 (defn parse-xlsx
   "Converts XLSX into collection of collections"
