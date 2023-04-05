@@ -9,8 +9,7 @@ To deploy to local repository `.m2`
     lein install
 
 ## Usage
-
-    ``` clojure
+``` clojure
     (ns example.core
        (:require [timlib.core :as tla]
                  [timlib.connections :as connections]))
@@ -20,4 +19,4 @@ To deploy to local repository `.m2`
     (tla/cursor conn "select count(1) from songs")
 
     ;;=> (["count(1)"] [100])
-    ```
+```
