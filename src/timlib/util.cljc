@@ -1,10 +1,14 @@
 (ns timlib.util
-  (:require [clojure.string :as str]
-            [hiccup.core :as hp]
-            [clojure.data.csv :as csv]
-            [clojure.java.io :as io])
+  #_{:clj-kondo/ignore [:refer-all]}
+  (:require
+   [clojure.core :refer :all]
+   [clojure.data.csv :as csv]
+   [clojure.java.io :as io]
+   [clojure.string :as str]
+   [hiccup.core :as hp])
 
-  (:import (oracle.jdbc.pool OracleDataSource))
+  (:import
+   (oracle.jdbc.pool OracleDataSource))
   (:gen-class))
 
 
@@ -208,7 +212,7 @@
 (defn addr-token->ip-token
   "Takes address token and expands it to integers or to a range of 1-255"
   [num]
-  (if (= num "*") (range 1 255) (Integer/parseInt num)))
+  (if (= num "*") (range 1 255) (parse-long num)))
 
 
 (defn ip-tokens->addresses

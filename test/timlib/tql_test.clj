@@ -1,5 +1,5 @@
 (ns timlib.tql-test
-  (:require [timlib.tql :refer [LIKE as-maps inner-join left-join query toad] :as tql]
+  (:require [timlib.tql :refer [LIKE inner-join left-join query toad] :as tql]
             [clojure.edn :as edn]
             [clojure.test :refer [deftest is run-tests]]))
 
@@ -328,7 +328,7 @@
                   (inner-join crew-area :a [:crew-id = :crew-id]))
         :order-by [:crew-id :a:loc-id])
 
-  (toad :select [:crew-id, :crew-name, :a:loc-id, :l:loc-name]
+  (toad :select [:crew-id, :crew-name, :a:loc-id, :l:loc-name, :sysdate, :rownum]
         :from (-> crew
                   (inner-join crew-area :a [:crew-id   = :crew-id])
                   (inner-join loc       :l  [:a:loc-id = :loc-id]))
