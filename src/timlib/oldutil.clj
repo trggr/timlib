@@ -1,4 +1,4 @@
-(ns timlib.core
+(ns timlib.oldutil
   (:require [clojure.string :as str]
             [clojure.java.io :as io])
   (:import (oracle.jdbc.pool OracleDataSource))
@@ -129,3 +129,12 @@
   (when xlsx
     (for [line (str/split-lines xlsx)]
       (map str/trim (str/split line #"\t")))))
+
+(defn compress
+  "Takes coll and turns it into collection where each elements is followed by
+   a number of its occurrences, e.g. [a a a b b] => [a 3 b 2]"
+  [coll]
+  (->> coll
+       (partition-by identity)
+       (reduce (fn [acc xs] (conj acc (first xs) (count xs)))
+               [])))
