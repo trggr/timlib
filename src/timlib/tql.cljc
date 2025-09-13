@@ -16,6 +16,13 @@
                          :group-by})
 
 
+(defn SQL=
+  "SQL equality. nil != nil"
+  [x y]
+  (if (or (nil? x) (nil? y))
+    false
+    (= x y)))
+
 (defn truly?
   "Takes f, left, and right. Returns the result of (f left right).
    If there's an exception, suppresses it and returns false"
@@ -108,21 +115,21 @@
 
 (defn clause-select
   [select select-distinct? data]
-  (let [select       (if (coll? select)
-                       select
-                       (vector select))
-        aliases      (->> select
-                          (reduce (fn [acc c]
-                                    (if (= c :*)
-                                      (concat acc  (remove RESERVED-COLUMNS (keys (first data))))
-                                      (conj acc c)))
-                                  [])
-                          (map (fn [s] (if (coll? s)
-                                         [(second s) (first s)]
-                                         [s s])))
-                          (into {}))
-        projected    (cond (nil? select) data
-                           :else (project aliases data))]
+  (let [select     (if (coll? select)
+                     select
+                     (vector select))
+        pairs      (->> select
+                        (reduce (fn [acc c]
+                                  (if (= c :*)
+                                    (concat acc  (remove RESERVED-COLUMNS (keys (first data))))
+                                    (conj acc c)))
+                                [])
+                        (map (fn [s] (if (coll? s)
+                                       [(second s) (first s)]
+                                       [s s]))))
+        aliases    (into {} pairs)
+        projected  (cond (nil? select) data
+                         :else (project aliases data))]
     (if select-distinct?
       (into [] (set projected))
       projected)))
@@ -140,15 +147,36 @@
                     []))
     data))
 
+(defn sort-factory
+  "Takes coll of tuples (f sort-order) and returns an f which
+   can sort multiple columns in various orders via
+   (sort-by identity f data)"
+  [coll]
+  (fn [row1 row2]
+    (reduce (fn [_acc [f sort-order]]
+              (let [a (f row1)
+                    b (f row2)
+                    c (if (= sort-order :asc)
+                        (compare a b)
+                        (compare b a))]
+                (if (not (zero? c))
+                  (reduced c)
+                  c)))
+            0
+            coll)))
 
 (defn clause-order-by
   [order-by data]
-  (if order-by
-    (sort-by (if (coll? order-by)
-               (apply juxt order-by)
-               order-by)
-             data)
-    data))
+  (if (not order-by)
+    data
+    (let [fs (if-not (coll? order-by)
+               [[order-by :asc]]
+               (map (fn [f] (if (coll? f)
+                              [(first f) (second f)]
+                              [f :asc]))
+                    order-by))]
+      (sort-by identity (sort-factory fs) data))))
+
 
 
 (defn parse-query
@@ -275,5 +303,3 @@
 
 (toad :select :* :from [{:a 1 :b 2} {:a 10 :b 20}])
 )
-
-
