@@ -1,14 +1,11 @@
 (ns timlib.util
-  #_{:clj-kondo/ignore [:refer-all]}
-  (:require
-   [clojure.core :refer :all]
-   [clojure.data.csv :as csv]
-   [clojure.java.io :as io]
-   [clojure.string :as str]
-   [hiccup.core :as hp])
+  (:require [clojure.core :refer :all]
+            [clojure.string :as str]
+            [hiccup.core :as hp]
+            [clojure.data.csv :as csv]
+            [clojure.java.io :as io])
 
-  (:import
-   (oracle.jdbc.pool OracleDataSource))
+  (:import (oracle.jdbc.pool OracleDataSource))
   (:gen-class))
 
 
@@ -23,6 +20,14 @@
                              coll)]
   (when found?
     idx)))
+
+;;--------------------------------------------
+(defn pad
+  "Takes xs and pads it to a length of n with padding"
+  ([xs n padding]
+   (take n (concat xs (repeat padding))))
+  ([xs n]
+   (pad xs n nil)))
 
 
 ;; From https://stackoverflow.com/questions/18246549/cartesian-product-in-clojure
@@ -46,9 +51,11 @@
 (defn now
   "Returns current time as a string. If no format is provided, uses MM/dd/yyyy HH:mm:ss"
   ([format]
-   (-> (java.text.SimpleDateFormat. format)
-       (.format (java.util.Date.))))
-  ([] (now "MM/dd/yyyy HH:mm:ss")))
+   #?(:clj     (-> (java.text.SimpleDateFormat. format)
+                   (.format (java.util.Date.)))
+      :cljs    (.toLocaleString (js/Date. format))))
+  ([]
+   (now "yyyy/MM/dd HH:mm:ss")))
 
 (defn log
   "Prints message to the log"
@@ -212,7 +219,7 @@
 (defn addr-token->ip-token
   "Takes address token and expands it to integers or to a range of 1-255"
   [num]
-  (if (= num "*") (range 1 255) (parse-long num)))
+  (if (= num "*") (range 1 255) (Integer/parseInt num)))
 
 
 (defn ip-tokens->addresses
@@ -277,5 +284,3 @@
   ;;         (conj (fetch-all identity) header))))))
 
   -)
-
-
