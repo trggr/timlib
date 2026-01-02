@@ -8,7 +8,8 @@
                         :rownum
                         :prior-row})
 
-(def SUPPORTED-CLAUSES #{:select-distinct
+(def SUPPORTED-CLAUSES #{:return-column-names
+                         :select-distinct?
                          :select
                          :from
                          :where
@@ -66,7 +67,7 @@
             (conj acc
                   (into {}
                         (for [[alias f] aliases]
-                          [alias (f row)]))))
+                          [alias (if (string? f) f (f row))]))))
           []
           rows))
 
@@ -113,27 +114,25 @@
             from)))
 
 
+(defn column-alias-pairs
+  [select column-names]
+  (->> select
+       (reduce (fn [acc c]
+                 (if (= c :*)
+                   (concat acc  (remove RESERVED-COLUMNS column-names))
+                   (conj acc c)))
+               [])
+       (map (fn [s] (if (coll? s)
+                      [(second s) (first s)]
+                      [s s])))))
+
 (defn clause-select
-  [select select-distinct? data]
-  (let [select     (if (coll? select)
-                     select
-                     (vector select))
-        pairs      (->> select
-                        (reduce (fn [acc c]
-                                  (if (= c :*)
-                                    (concat acc  (remove RESERVED-COLUMNS (keys (first data))))
-                                    (conj acc c)))
-                                [])
-                        (map (fn [s] (if (coll? s)
-                                       [(second s) (first s)]
-                                       [s s]))))
-        aliases    (into {} pairs)
-        projected  (cond (nil? select) data
-                         :else (project aliases data))]
+  [select select-distinct? pairs data]
+  (let [projected  (cond (nil? select) data
+                         :else (project (into {} pairs) data))]
     (if select-distinct?
       (into [] (set projected))
       projected)))
-
 
 (defn clause-group-by
   [grouping data]
@@ -182,13 +181,12 @@
 (defn parse-query
   [args]
   (let [m      (apply hash-map args)
-        unsupp (s/difference (set (keys m)) SUPPORTED-CLAUSES)
-        sd     (m :select-distinct)
-        m      (if sd
+        m      (if (m :select-distinct)
                  (assoc (dissoc m :select-distinct)
-                        :select sd
+                        :select (m :select-distinct)
                         :select-distinct? true)
-                 m)]
+                 m)
+        unsupp (s/difference (set (keys m)) SUPPORTED-CLAUSES)]
     (if (seq unsupp)
       (assoc m
              :syntax-ok? false
@@ -210,22 +208,33 @@
      :group-by - coll of fns to GROUP BY
      :order-by - k or coll of ks"
   [& args]
-  (let [{:keys [:select
+  (let [{:keys [:return-column-names
+                :select
                 :select-distinct?
                 :from
                 :where
                 :group-by
                 :order-by
                 :syntax-ok?
-                :err-msg]} (parse-query args)]
+                :err-msg]
+         :or {return-column-names false}} (parse-query args)]
     (if-not syntax-ok?
       err-msg
-      (->> from
-           clause-from
-           (clause-where where)
-           (clause-select select select-distinct?)
-           (clause-group-by group-by)
-           (clause-order-by order-by)))))
+      (let [data   (->> from
+                        clause-from
+                        (clause-where where))
+            select (or select :*)
+            select (if (coll? select)
+                     select
+                     (vector select))
+            pairs  (column-alias-pairs select (keys (first data)))
+            maps   (->> data
+                        (clause-select select select-distinct? pairs)
+                        (clause-group-by group-by)
+                        (clause-order-by order-by))]
+        (if return-column-names
+          {:column-names (mapv second pairs) :data-maps maps}
+          maps)))))
 
 
 (defn combine-maps
@@ -259,47 +268,45 @@
     (combine-maps l r right-alias)))
 
 
-(defn format2
-  "Takes s, pads it with spaces or truncates, to fit it into a length of n"
-  [n s]
-  (apply str (take n (concat s (repeat " ")))))
+(defn resize-string
+  "Returns s adjusted to size by truncating or padding with spaces"
+  [size s]
+  (apply str (take size (concat s (repeat " ")))))
 
 
 (defn format-table
-  "STRAIGHT COPY FROM clojure's source code only because clojureit's not available in scittle
+  "Approximation of a similar function in Clojure's source code only because
+   it's not available in Scittle.
    Prints a collection of maps in a textual table. Prints table headings
    ks, and then a line of output for each row, corresponding to the keys
    in ks. If ks are not specified, use the keys of the first item in rows."
-  {:added "1.3"}
   ([ks rows]
    (when (seq rows)
-     (let [widths (map
-                   (fn [k]
-                     (apply max (count (str k)) (map #(count (str (get % k))) rows)))
-                   ks)
+     (let [widths  (map
+                    (fn [k]
+                      (apply max
+                             (count (str k))
+                             (map #(count (str (get % k))) rows)))                    ks)
            spacers (map #(apply str (repeat % "-")) widths)
-           fmts (map identity widths)
-           fmt-row (fn [leader divider trailer row]
+           prn     (fn [leader divider trailer row]
                      (str leader
                           (apply str (interpose divider
-                                                (for [[col fmt] (map vector (map #(get row %) ks) fmts)]
-                                                  (format2 fmt (str col)))))
+                                                (for [[col width]
+                                                      (map vector (map #(get row %) ks) widths)]
+                                                  (resize-string width (str col)))))
                           trailer))]
-       (str/join \newline (concat [(fmt-row "|" "|" "|" (zipmap ks ks))
-                                   (fmt-row "|" "+" "|" (zipmap ks spacers))]
+       (str/join \newline (concat [(prn "|" "|" "|" (zipmap ks ks))
+                                   (prn "|" "+" "|" (zipmap ks spacers))]
                                   (for [row rows]
-                                    (fmt-row "|" "|" "|" row)))))))
-  ([rows] (format-table (keys (first rows)) rows)))
-
+                                    (prn "|" "|" "|" row)))))))
+  ([rows]
+   (format-table (keys (first rows)) rows)))
 
 (defn toad
   "Takes TQL query, runs it and prints the results"
   [& args]
-  (let [data (apply query args)]
-    (when (coll? data)
-      (println (format-table data)))))
-
-(comment
-
-(toad :select :* :from [{:a 1 :b 2} {:a 10 :b 20}])
-)
+  (let [args (conj (vec args) :return-column-names true)]
+    (when-let [data (apply query args)]
+      (println (format-table
+                (get data :column-names)
+                (get data :data-maps))))))
