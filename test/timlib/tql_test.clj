@@ -70,6 +70,13 @@
            {:a 20, :b 10, :sum 30}])
       "with functions"))
 
+(deftest test-select-with-non-functions
+  (is (=  (query :select [["Hello" :a]]
+                 :from F)
+          [{:a "Hello"} {:a "Hello"} {:a "Hello"} {:a "Hello"}])
+      "with non-functions"))
+
+
 ;;------------------------------------------
 (deftest test-select-reserved-columns
   (is (= (query :select [:a
@@ -216,12 +223,54 @@
           {:b 10, :group-by [{:amt 12}]}])
       "GROUP BY one column"))
 
+(deftest test-group-by-2
+  (is (= (query :select [:a :b :amt]
+                :from  [{:a 1,  :b 30, :amt 1}
+                        {:a 2,  :b 20, :amt 3}
+                        {:a 1 , :b 30, :amt 5}
+                        {:a 2 , :b 10, :amt 7}]
+                :group-by [:a :b])
+         [{:a 1, :b 30, :group-by [{:amt 1} {:amt 5}]}
+          {:a 2, :b 20, :group-by [{:amt 3}]}
+          {:a 2, :b 10, :group-by [{:amt 7}]}])
+      "GROUP BY more than one column"))
+
 (comment
 
-  (run-tests)
-  (toad :select :a :from F)
-  (toad :select :a :from A)
+  (query :select [:a :b :amt]
+         :from  [{:a 1,  :b 30, :amt 1}
+                 {:a 2,  :b 20, :amt 3}
+                 {:a 1 , :b 30, :amt 5}
+                 {:a 2 , :b 10, :amt 7}]
+         :group-by [:a :b])
 
+  (toad :select [:a :b :amt :cnt]
+        :from  [{:a 1,  :b 30, :amt 1, :cnt 1}
+                {:a 2,  :b 20, :amt 3, :cnt 2}
+                {:a 1 , :b 30, :amt 5, :cnt 3}
+                {:a 1 , :b 30, :amt 2, :cnt 4}
+                {:a 2 , :b 10, :amt 7, :cnt 5}]
+        :group-by [:a :b])
+
+  (def WIDE-TABLE
+    (for [r (range 10)]
+      (apply vector (map #(+ r %) (range 1 100)))))
+
+  (toad
+   ;; :select [:c1 :c2]
+   :select [:c1 :c2 :c3 :c4 :c5 :c6 :c7 :c8 :c9 :c10
+            :c11 :c12 :c13 :c14 :c15 :c16 :c17 :c18 :c19 :c20
+            :c21 :c22 :c23 :c24 :c25 :c26 :c27 :c28 :c29 :c30]
+   :from WIDE-TABLE
+   :where [:rownum <= 5])
+
+  (toad :select [:a :b :rownum] :from [{:a 1 :b 2} {:a 10 :b 20}])
+
+  (toad :select [:c1 :c2 :rownum] :from [[1 2] [10 20]])
+
+  (run-tests)
+  (toad :select [:a :b :c :d :e :f :g] :from F)
+  (toad :select :a :from A)
 
 
   (->> (query :select [:a
@@ -235,6 +284,8 @@
 
   ;; select, including select :*
   (toad :select :* :from F :group-by [:a])
+
+  (query :select :* :from F :return-map? false)
 
   (toad :select [:a :b :amt]
         :from F
