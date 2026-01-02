@@ -191,6 +191,16 @@
       "WHERE with LIKE clause"))
 
 ;;------------------------------------------
+(deftest test-plain-text-query
+  (is (= (query "select :a, :b from F where :a >= 10")
+         (query :select [:a :b] :from F :where [:a >= 10])))
+  (is (= (query "select distinct :b from F order by :b")
+         (query :select-distinct [:b] :from F :order-by :b)))
+  (is (= (query "select :c from F where :c LIKE #\"o\"")
+         (query :select [:c] :from F :where [:c LIKE #"o"])))
+  "plain-text SQL-like query parsing")
+
+;;------------------------------------------
 (deftest test-inner-join
   (is (= [{:a 15, :F:b 10}
           {:a 10, :F:b 10}
@@ -262,7 +272,7 @@
             :c11 :c12 :c13 :c14 :c15 :c16 :c17 :c18 :c19 :c20
             :c21 :c22 :c23 :c24 :c25 :c26 :c27 :c28 :c29 :c30]
    :from WIDE-TABLE
-   :where [:rownum <= 5])
+   :where [:rownum <= 15])
 
   (toad :select [:a :b :rownum] :from [{:a 1 :b 2} {:a 10 :b 20}])
 

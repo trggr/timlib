@@ -178,14 +178,136 @@
 
 
 
+(defn- parse-operator
+  "Map operator strings to actual functions used by the engine"
+  [op-str]
+  (let [op (str/lower-case (str op-str))]
+    (case op
+      "=" SQL=
+      "==" SQL=
+      "!=" (fn [a b] (not (SQL= a b)))
+      ">=" >=
+      "<=" <=
+      ">" >
+      "<" <
+      "like" LIKE
+      (throw (ex-info "Unknown operator" {:op op-str})))))
+
+(defn- safe-read
+  "Attempt to read the token as Clojure/EDN, fall back to trimmed string on failure." 
+  [s]
+  (try (read-string s)
+       (catch #?(:clj Exception
+                 :cljs :default) _
+         (str/trim s))))
+
+(defn- parse-from-string
+  "Parse the RHS of a FROM clause. If it is a literal collection, return it.
+   If it is a symbol, try to resolve it to a Var (clj) otherwise return the symbol." 
+  [s]
+  (let [s (str/trim s)
+        parsed (try (read-string s) (catch #?(:clj Exception :cljs :default) _ ::no-read))]
+    (cond
+      (and (coll? parsed) (not (symbol? parsed))) parsed
+      (= parsed ::no-read)
+      (let [sym (symbol s)]
+        #?(:clj (try (if-let [v (ns-resolve *ns* sym)] (deref v) sym) (catch Exception _ sym))
+           :cljs sym))
+      (symbol? parsed)
+      (let [sym parsed]
+        #?(:clj (try (if-let [v (ns-resolve *ns* sym)] (deref v) sym) (catch Exception _ sym))
+           :cljs sym))
+      :else parsed)))
+
+(defn- parse-select-string
+  "Parse select clause body into a vector of select expressions.
+   Supports `distinct` prefix and `AS` aliasing (e.g. 'col as alias')." 
+  [s]
+  (let [s (str/trim s)
+        ;; detect and strip leading DISTINCT
+        distinct? (boolean (re-find #"(?i)^distinct\b" s))
+        s (if distinct?
+            (str/trim (str/replace-first s #"(?i)^distinct\b" ""))
+            s)
+        parts (map str/trim (str/split s #","))]
+    {:select (mapv (fn [part]
+                     (if-let [m (re-matches #"(?i)^(.+?)\s+as\s+(.+)$" part)]
+                       (let [left (safe-read (nth m 1))
+                             alias-str (str/trim (nth m 2))
+                             alias (if (str/starts-with? alias-str ":")
+                                     (safe-read alias-str)
+                                     (keyword alias-str))]
+                         ;; return pair [fn alias] to match existing code expectations
+                         [left alias])
+                       (let [p (safe-read part)]
+                         p)))
+                   parts)
+     :distinct? distinct?}))
+
+(defn- parse-where-string
+  "Parse a WHERE clause body into a vector of infix tokens where operators
+   have been replaced by actual functions." 
+  [s]
+  (let [conds (->> (str/trim s)
+                   (str/replace #"(?i)\band\b" ",")
+                   (str/split #","))]
+    (vec (apply concat
+                (for [c conds :let [c (str/trim c)] :when (seq c)]
+                  (let [[_ l op r] (re-matches #"(?i)^\s*(.+?)\s*(<=|>=|<>|!=|=|<|>|like)\s*(.+)\s*$" c)]
+                    (if (nil? l)
+                      (throw (ex-info "Cannot parse WHERE clause" {:clause c}))
+                      [(safe-read l) (parse-operator op) (safe-read r)])))))))
+
+(defn- parse-order-by-string
+  "Parse ORDER BY clause body into a vector of [col order] pairs.
+   Order is one of :asc or :desc." 
+  [s]
+  (let [parts (map str/trim (str/split (str/trim s) #","))]
+    (mapv (fn [p]
+            (let [m (re-matches #"(?i)^\s*(.+?)\s*(asc|desc)?\s*$" p)
+                  col (safe-read (nth m 1))
+                  dir (if (and m (nth m 2))
+                        (if (= "desc" (str/lower-case (nth m 2))) :desc :asc)
+                        :asc)]
+              [col dir]))
+          parts)))
+
+(defn- parse-group-by-string
+  "Parse GROUP BY clause body into a vector of columns/functions." 
+  [s]
+  (mapv (comp safe-read str/trim) (str/split (str/trim s) #",")))
+
+(defn- parse-query-string
+  "Turn a simple SQL-like string into the same map structure expected by parse-query.
+   Supports SELECT, FROM, WHERE, GROUP BY, ORDER BY. SELECT DISTINCT is supported." 
+  [s]
+  (let [s (str/trim s)
+        capture (fn [kw]
+                  (let [pattern (re-pattern (str "(?i)" kw "\\s+(.+?)(?=\\s+(from|where|group-by|order-by|$))"))]
+                    (some-> (re-find pattern s) second str/trim)))
+        select-s (capture "select")
+        from-s   (capture "from")
+        where-s  (capture "where")
+        group-s  (capture "group-by")
+        order-s  (capture "order-by")]
+    (cond-> {}
+      select-s (let [{:keys [select distinct?]} (parse-select-string select-s)] (assoc :select select))
+      (and select-s (re-find #"(?i)^distinct\b" select-s)) (assoc :select-distinct? true)
+      from-s (assoc :from (parse-from-string from-s))
+      where-s (assoc :where (parse-where-string where-s))
+      group-s (assoc :group-by (parse-group-by-string group-s))
+      order-s (assoc :order-by (parse-order-by-string order-s)))))
+
 (defn parse-query
   [args]
-  (let [m      (apply hash-map args)
-        m      (if (m :select-distinct)
-                 (assoc (dissoc m :select-distinct)
-                        :select (m :select-distinct)
-                        :select-distinct? true)
-                 m)
+  (let [m (if (and (= (count args) 1) (string? (first args)))
+            (parse-query-string (first args))
+            (apply hash-map args))
+        m (if (m :select-distinct)
+            (assoc (dissoc m :select-distinct)
+                   :select (m :select-distinct)
+                   :select-distinct? true)
+            m)
         unsupp (s/difference (set (keys m)) SUPPORTED-CLAUSES)]
     (if (seq unsupp)
       (assoc m
@@ -310,3 +432,4 @@
       (println (format-table
                 (get data :column-names)
                 (get data :data-maps))))))
+
