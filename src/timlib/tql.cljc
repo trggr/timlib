@@ -211,11 +211,13 @@
       (and (coll? parsed) (not (symbol? parsed))) parsed
       (= parsed ::no-read)
       (let [sym (symbol s)]
-        #?(:clj (try (if-let [v (ns-resolve *ns* sym)] (deref v) sym) (catch Exception _ sym))
+        #?(:clj (let [found (some (fn [ns] (ns-resolve ns sym)) (all-ns))]
+                  (if found (deref found) sym))
            :cljs sym))
       (symbol? parsed)
       (let [sym parsed]
-        #?(:clj (try (if-let [v (ns-resolve *ns* sym)] (deref v) sym) (catch Exception _ sym))
+        #?(:clj (let [found (some (fn [ns] (ns-resolve ns sym)) (all-ns))]
+                  (if found (deref found) sym))
            :cljs sym))
       :else parsed)))
 
@@ -289,10 +291,13 @@
         from-s   (capture "from")
         where-s  (capture "where")
         group-s  (capture "group-by")
-        order-s  (capture "order-by")]
+        order-s  (capture "order-by")
+        select-parsed (when select-s (parse-select-string select-s))
+        select-val (when select-parsed (:select select-parsed))
+        distinct? (boolean (and select-parsed (:distinct? select-parsed)))]
     (cond-> {}
-      select-s (let [{:keys [select distinct?]} (parse-select-string select-s)] (assoc :select select))
-      (and select-s (re-find #"(?i)^distinct\b" select-s)) (assoc :select-distinct? true)
+      select-val (assoc :select select-val)
+      distinct? (assoc :select-distinct? true)
       from-s (assoc :from (parse-from-string from-s))
       where-s (assoc :where (parse-where-string where-s))
       group-s (assoc :group-by (parse-group-by-string group-s))
