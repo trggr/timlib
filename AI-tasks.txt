@@ -1,0 +1,19 @@
+Make a parser of sql queries. I want to take a string of sql query and return a map with the following keys:
+                         :select
+                         :from
+                         :where
+                         :order-by
+                         :group-by.
+The values in the map should be as such:
+
+1. For the :select key, I want a collection of column/alias pairs. For a query "select a, b from table", the pairs will be [[a a] [b b]];
+for a query "select a a1, b b1 from table", the pairs will be [[a a1] [b b1]].
+
+2. For :from key, return an original Clojure structure provided in sql string, e.g. "select a from table", the value will be table.
+
+3. For :where, return a collection of clauses [column op value], e.g. for "select a, b from table where a = 10 and b = 20, the value
+should be [a = 10 b = 20].
+
+4. For :order-by, the value should be pairs [[:b :desc] [:c :asc]], when query is "select a, b from table order by b desc, a"
+
+5. For :group-by, the value should be list of columns [a b], when query is "select a, b from table group by a, b"
